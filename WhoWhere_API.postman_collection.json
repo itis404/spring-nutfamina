@@ -1,0 +1,386 @@
+{
+  "info": {
+    "name": "WhoWhere API",
+    "_postman_id": "wwwgame-collection-v1",
+    "description": "REST API коллекция для проекта «Что? Где? Когда?».\n\nПеред запросами API нужно войти через эндпоинт **Login** в папке Auth — Postman автоматически сохранит сессионную куку.\n\nПодзапросы в БД:\n- `GET /api/questions/unanswered` — NOT IN subquery (вопросы, на которые пользователь ещё не отвечал)\n- `GET /profile` — MIN + GROUP BY subquery (дедупликация истории ответов)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "questionId",
+      "value": "1",
+      "type": "string",
+      "description": "ID вопроса для запросов по конкретному вопросу"
+    },
+    {
+      "key": "packId",
+      "value": "1",
+      "type": "string",
+      "description": "ID пака для запроса /unanswered"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Авторизация. Выполни Login перед всеми остальными запросами.",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login successful — redirect to /home\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 302]);",
+                  "});",
+                  "pm.test(\"Session cookie set\", function () {",
+                  "    const cookies = pm.cookies.toObject();",
+                  "    pm.expect(cookies).to.have.property('JSESSIONID');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "admin",
+                  "description": "Логин. Для обычного пользователя замени на свой."
+                },
+                {
+                  "key": "password",
+                  "value": "admin123",
+                  "description": "Пароль"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["login"]
+            },
+            "description": "Форм-логин Spring Security. Postman автоматически сохранит JSESSIONID куку и будет отправлять её во всех следующих запросах."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Questions",
+      "description": "CRUD-операции над вопросами + получение ответа + подзапрос «неотвеченные».",
+      "item": [
+        {
+          "name": "Get All Questions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Response is array\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "pm.test(\"Each question has id and text\", function () {",
+                  "    const body = pm.response.json();",
+                  "    if (body.length > 0) {",
+                  "        pm.expect(body[0]).to.have.property('id');",
+                  "        pm.expect(body[0]).to.have.property('text');",
+                  "        pm.collectionVariables.set('questionId', body[0].id);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions"]
+            },
+            "description": "Возвращает список всех вопросов в БД."
+          }
+        },
+        {
+          "name": "Get Question by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Question has correct id\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.id).to.eql(parseInt(pm.collectionVariables.get('questionId')));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "{{questionId}}"]
+            },
+            "description": "Возвращает один вопрос по ID. Если не найден — 404 от RestExceptionHandler."
+          }
+        },
+        {
+          "name": "Create Question",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 (created)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"В каком году основана Москва?\",\n  \"answer\": \"1147\",\n  \"comment\": \"Первое упоминание Москвы в летописи — 1147 год\",\n  \"topic\": \"Москва\",\n  \"difficulty\": \"MEDIUM\",\n  \"createdTime\": \"2025-01-01T12:00:00\",\n  \"pack\": { \"id\": {{packId}} }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions"]
+            },
+            "description": "Создаёт новый вопрос. CSRF отключён для /api/**, поэтому токен не нужен."
+          }
+        },
+        {
+          "name": "Update Question",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 (updated)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"В каком году основана Москва? (обновлено)\",\n  \"answer\": \"1147\",\n  \"comment\": \"Обновлённый комментарий\",\n  \"topic\": \"Москва\",\n  \"difficulty\": \"EASY\",\n  \"createdTime\": \"2025-01-01T12:00:00\",\n  \"pack\": { \"id\": {{packId}} }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "{{questionId}}"]
+            },
+            "description": "Обновляет текст, ответ, комментарий, сложность и пак вопроса."
+          }
+        },
+        {
+          "name": "Delete Question",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 (deleted)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "{{questionId}}"]
+            },
+            "description": "Удаляет вопрос по ID. Рекомендуется сначала создать тестовый вопрос через Create Question, сохранить его ID и удалить именно его."
+          }
+        },
+        {
+          "name": "Get Answer + Wikipedia",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Response has answer field\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('answer');",
+                  "});",
+                  "pm.test(\"Response has wikipediaSummary field\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('wikipediaSummary');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/{{questionId}}/answer",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "{{questionId}}", "answer"]
+            },
+            "description": "Возвращает правильный ответ, комментарий и краткую справку из Wikipedia API (OkHttp → wikipedia.org/api/rest_v1/page/summary/{topic})."
+          }
+        },
+        {
+          "name": "Submit Answer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Response has answer and wikipediaSummary\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('answer');",
+                  "    pm.expect(body).to.have.property('wikipediaSummary');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answer\": \"1147\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/{{questionId}}/submit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "{{questionId}}", "submit"]
+            },
+            "description": "Сохраняет ответ пользователя в таблицу user_answers (CORRECT / INCORRECT). Возвращает правильный ответ и Wikipedia-справку. Именно этот эндпоинт использует игровой экран (game.jsp) через fetch()."
+          }
+        },
+        {
+          "name": "Get Unanswered Questions (Subquery)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Response is array\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.be.an('array');",
+                  "});",
+                  "pm.test(\"No answered questions in result (subquery check)\", function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.be.an('array');",
+                  "    console.log('Неотвеченных вопросов в паке: ' + body.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/questions/unanswered?packId={{packId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "questions", "unanswered"],
+              "query": [
+                {
+                  "key": "packId",
+                  "value": "{{packId}}",
+                  "description": "ID пака"
+                }
+              ]
+            },
+            "description": "**Демонстрация подзапроса NOT IN.**\n\nВозвращает только те вопросы пака, на которые авторизованный пользователь ещё не отвечал.\n\nJPQL в QuestionRepository:\n```sql\nSELECT q FROM Question q\nWHERE q.pack = :pack\n  AND q NOT IN (\n    SELECT ua.question FROM UserAnswer ua WHERE ua.user = :user\n  )\n```\n\nЭтот же метод используется на странице профиля (прогресс-бары «Осталось N вопросов»)."
+          }
+        }
+      ]
+    }
+  ]
+}
